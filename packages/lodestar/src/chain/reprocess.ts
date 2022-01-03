@@ -6,7 +6,7 @@ import {MapDef} from "../util/map";
  * To prevent our node from having to reprocess while struggling to sync,
  * we only want to reprocess attestations if block reaches our node before this time.
  */
-export const REPROCESS_MIN_TIME_TO_NEXT_SLOT = 2000;
+export const REPROCESS_MIN_TIME_TO_NEXT_SLOT_SEC = 2;
 
 type AwaitingAttestationPromise = {
   resolve: () => void;
@@ -78,9 +78,9 @@ export class ReprocessController {
    * If a block reach our node 1s before the next slot, for example, then probably node
    * is struggling and we don't want to reprocess anything at that time.
    */
-  onBlockImported({slot, root}: SlotRoot, advancedClock: Slot): void {
+  onBlockImported({slot, root}: SlotRoot, advancedSlot: Slot): void {
     // we are probably resyncing, don't want to reprocess attestations here
-    if (slot < advancedClock) return;
+    if (slot < advancedSlot) return;
 
     // resolve all related promises
     const awaitingPromisesBySlot = this.awaitingPromisesByRootBySlot.getOrDefault(slot);
