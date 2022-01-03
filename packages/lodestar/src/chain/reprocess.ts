@@ -8,6 +8,20 @@ import {MapDef} from "../util/map";
  */
 export const REPROCESS_MIN_TIME_TO_NEXT_SLOT_SEC = 2;
 
+/**
+ * Reasons to reject gossip attestation promises.
+ */
+export enum ReprocessError {
+  /**
+   * There are too many attestations that have unknown block root.
+   */
+  REACH_LIMITATION = "ERR_REPROCESS_REACH_LIMITATION",
+  /**
+   * The awaiting attestation is pruned per clock slot.
+   */
+  EXPIRED = "ERR_REPROCESS_EXPIRED",
+}
+
 type AwaitingAttestationPromise = {
   resolve: () => void;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -19,17 +33,6 @@ type AwaitingAttestationPromise = {
 const MAXIMUM_QUEUED_ATTESTATIONS = 16_384;
 
 type SlotRoot = {slot: Slot; root: RootHex};
-
-enum ReprocessError {
-  /**
-   * There are too many attestations that have unknown block root.
-   */
-  REACH_LIMITATION = "ERR_REPROCESS_REACH_LIMITATION",
-  /**
-   * The awaiting attestation is pruned per clock slot.
-   */
-  EXPIRED = "ERR_REPROCESS_EXPIRED",
-}
 
 /**
  * Some attestations may reach our node before the voted block, so we manage a cache to reprocess them
