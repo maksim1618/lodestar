@@ -12,6 +12,7 @@ type AwaitingAttestationPromise = {
   resolve: () => void;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   reject: (reason?: any) => void;
+  addedTimeMs: number;
 };
 
 // How many attestations (aggregate + unaggregate) we keep before new ones get dropped.
@@ -63,7 +64,7 @@ export class ReprocessController {
       } else {
         const awaitingPromisesByRoot = this.awaitingPromisesByRootBySlot.getOrDefault(slot);
         const awaitingPromises = awaitingPromisesByRoot.getOrDefault(root);
-        awaitingPromises.push({resolve, reject});
+        awaitingPromises.push({resolve, reject, addedTimeMs: Date.now()});
         this.awaitingPromisesCount++;
       }
     });
@@ -78,17 +79,19 @@ export class ReprocessController {
    * If a block reach our node 1s before the next slot, for example, then probably node
    * is struggling and we don't want to reprocess anything at that time.
    */
-  onBlockImported({slot, root}: SlotRoot, advancedSlot: Slot): void {
+  onBlockImported({slot: blockSlot, root}: SlotRoot, advancedSlot: Slot): void {
     // we are probably resyncing, don't want to reprocess attestations here
-    if (slot < advancedSlot) return;
+    if (blockSlot < advancedSlot) return;
 
     // resolve all related promises
-    const awaitingPromisesBySlot = this.awaitingPromisesByRootBySlot.getOrDefault(slot);
+    const awaitingPromisesBySlot = this.awaitingPromisesByRootBySlot.getOrDefault(blockSlot);
     const awaitingPromises = awaitingPromisesBySlot.getOrDefault(root);
-    for (const awaitingPromise of awaitingPromises) {
-      awaitingPromise.resolve();
+    const now = Date.now();
+    for (const {resolve, addedTimeMs} of awaitingPromises) {
+      resolve();
       this.awaitingPromisesCount--;
       this.metrics?.reprocessAttestations.resolve.inc();
+      this.metrics?.reprocessAttestations.waitTimeBeforeResolve.set((now - addedTimeMs) / 1000);
     }
 
     // prune
@@ -103,12 +106,15 @@ export class ReprocessController {
    * @param clockSlot
    */
   onSlot(clockSlot: Slot): void {
+    const now = Date.now();
+
     for (const key of this.awaitingPromisesByRootBySlot.keys()) {
       if (key < clockSlot) {
         // reject all related promises
         const awaitingPromises = Array.from(this.awaitingPromisesByRootBySlot.getOrDefault(key).values()).flat();
-        for (const awaitingPromise of awaitingPromises) {
-          awaitingPromise.reject(ReprocessError.EXPIRED);
+        for (const {reject, addedTimeMs} of awaitingPromises) {
+          reject(ReprocessError.EXPIRED);
+          this.metrics?.reprocessAttestations.waitTimeBeforeReject.set((now - addedTimeMs) / 1000);
           this.metrics?.reprocessAttestations.reject.inc({reason: ReprocessError.EXPIRED});
         }
 
