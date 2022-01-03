@@ -685,5 +685,22 @@ export function createLodestarMetrics(
         help: "Total number of precomputing next epoch transition wasted",
       }),
     },
+
+    // reprocess attestations
+    reprocessAttestations: {
+      total: register.gauge({
+        name: "lodestar_reprocess_attestations_total",
+        help: "Total number of attestations waiting to reprocess",
+      }),
+      resolve: register.gauge({
+        name: "lodestar_reprocess_attestations_resolve_total",
+        help: "Total number of attestations are reprocessed",
+      }),
+      reject: register.gauge<"reason">({
+        name: "lodestar_reprocess_attestations_reject_total",
+        help: "Total number of attestations are rejected to reprocess",
+        labelNames: ["reason"],
+      }),
+    },
   };
 }

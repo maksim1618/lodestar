@@ -21,6 +21,7 @@ import {AttestationPool, OpPool, SyncCommitteeMessagePool, SyncContributionAndPr
 import {LightClientServer} from "./lightClient";
 import {AggregatedAttestationPool} from "./opPools/aggregatedAttestationPool";
 import {PartiallyVerifiedBlockFlags} from "./blocks/types";
+import {ReprocessController} from "./reprocess";
 
 export type Eth2Context = {
   activeValidatorCount: number;
@@ -48,6 +49,7 @@ export interface IBeaconChain {
   checkpointStateCache: CheckpointStateCache;
   regen: IStateRegenerator;
   readonly lightClientServer: LightClientServer;
+  readonly reprocessController: ReprocessController;
 
   // Ops pool
   readonly attestationPool: AttestationPool;

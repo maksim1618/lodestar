@@ -35,6 +35,7 @@ import {Eth1ForBlockProductionDisabled} from "../../../../src/eth1";
 import {ExecutionEngineDisabled} from "../../../../src/executionEngine";
 import {ReqRespBlockResponse} from "../../../../src/network/reqresp/types";
 import {testLogger} from "../../logger";
+import {ReprocessController} from "../../../../src/chain/reprocess";
 
 /* eslint-disable @typescript-eslint/no-empty-function */
 
@@ -63,6 +64,7 @@ export class MockBeaconChain implements IBeaconChain {
   regen: IStateRegenerator;
   emitter: ChainEventEmitter;
   lightClientServer: LightClientServer;
+  reprocessController: ReprocessController;
 
   // Ops pool
   readonly attestationPool = new AttestationPool();
@@ -114,6 +116,7 @@ export class MockBeaconChain implements IBeaconChain {
       {config: this.config, emitter: this.emitter, logger, db: db},
       {genesisTime: this.genesisTime, genesisValidatorsRoot: this.genesisValidatorsRoot as Uint8Array}
     );
+    this.reprocessController = new ReprocessController(null);
   }
 
   getHeadState(): CachedBeaconState<allForks.BeaconState> {

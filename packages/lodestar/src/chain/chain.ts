@@ -43,6 +43,7 @@ import {Archiver} from "./archiver";
 import {IEth1ForBlockProduction} from "../eth1";
 import {IExecutionEngine} from "../executionEngine";
 import {PrecomputeNextEpochTransitionScheduler} from "./precomputeNextEpochTransition";
+import {ReprocessController} from "./reprocess";
 
 export class BeaconChain implements IBeaconChain {
   readonly genesisTime: Number64;
@@ -60,6 +61,7 @@ export class BeaconChain implements IBeaconChain {
   checkpointStateCache: CheckpointStateCache;
   regen: IStateRegenerator;
   readonly lightClientServer: LightClientServer;
+  readonly reprocessController: ReprocessController;
 
   // Ops pool
   readonly attestationPool = new AttestationPool();
@@ -138,6 +140,8 @@ export class BeaconChain implements IBeaconChain {
       {config, db, emitter, logger},
       {genesisTime: this.genesisTime, genesisValidatorsRoot: this.genesisValidatorsRoot as Uint8Array}
     );
+
+    this.reprocessController = new ReprocessController(this.metrics);
 
     this.blockProcessor = new BlockProcessor(
       {

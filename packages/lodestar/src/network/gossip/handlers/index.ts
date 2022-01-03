@@ -8,6 +8,7 @@ import {OpSource} from "../../../metrics/validatorMonitor";
 import {IBeaconChain} from "../../../chain";
 import {
   AttestationError,
+  AttestationErrorCode,
   BlockError,
   BlockErrorCode,
   BlockGossipError,
@@ -119,49 +120,60 @@ export function getGossipHandlers(modules: ValidatorFnsModules): GossipHandlers 
     },
 
     [GossipType.beacon_aggregate_and_proof]: async (signedAggregateAndProof, _topic, _peer, seenTimestampSec) => {
+      let indexedAttestation: phase0.IndexedAttestation | undefined = undefined;
+      let committeeIndices: ValidatorIndex[] | undefined = undefined;
+
       try {
-        const {indexedAttestation, committeeIndices} = await validateGossipAggregateAndProof(
-          chain,
-          signedAggregateAndProof
-        );
-
-        metrics?.registerAggregatedAttestation(
-          OpSource.gossip,
-          seenTimestampSec,
-          signedAggregateAndProof,
-          indexedAttestation
-        );
-
-        // TODO: Add DoS resistant pending attestation pool
-        // switch (e.type.code) {
-        //   case AttestationErrorCode.FUTURE_SLOT:
-        //     chain.pendingAttestations.putBySlot(e.type.attestationSlot, attestation);
-        //     break;
-        //   case AttestationErrorCode.UNKNOWN_TARGET_ROOT:
-        //   case AttestationErrorCode.UNKNOWN_BEACON_BLOCK_ROOT:
-        //     chain.pendingAttestations.putByBlock(e.type.root, attestation);
-        //     break;
-        // }
-
-        // Handler
-        const aggregatedAttestation = signedAggregateAndProof.message.aggregate;
-
-        chain.aggregatedAttestationPool.add(
-          aggregatedAttestation,
-          indexedAttestation.attestingIndices as ValidatorIndex[],
-          committeeIndices
-        );
+        const validationResult = await validateGossipAggregateAndProof(chain, signedAggregateAndProof);
+        indexedAttestation = validationResult.indexedAttestation;
+        committeeIndices = validationResult.committeeIndices;
       } catch (e) {
-        if (e instanceof AttestationError && e.action === GossipAction.REJECT) {
-          const archivedPath = chain.persistInvalidSszObject(
-            "signedAggregatedAndProof",
-            ssz.phase0.SignedAggregateAndProof.serialize(signedAggregateAndProof),
-            toHexString(ssz.phase0.SignedAggregateAndProof.hashTreeRoot(signedAggregateAndProof))
-          );
-          logger.debug("The invalid gossip aggregate and proof was written to", archivedPath, e);
+        if (!(e instanceof AttestationError)) throw e;
+
+        let retry = false;
+        try {
+          if (e.type.code === AttestationErrorCode.UNKNOWN_BEACON_BLOCK_ROOT) {
+            const {slot, beaconBlockRoot} = signedAggregateAndProof.message.aggregate.data;
+            await chain.reprocessController.waitForBlock({slot, root: toHexString(beaconBlockRoot)});
+            // block comes, retry. Otherwises it jumps to the catch (e2) clause below.
+            retry = true;
+            const validationResult = await validateGossipAggregateAndProof(chain, signedAggregateAndProof);
+            indexedAttestation = validationResult.indexedAttestation;
+            committeeIndices = validationResult.committeeIndices;
+          } else {
+            throw e;
+          }
+        } catch (e2) {
+          // if "waitForBlock" gets rejected, ignore its error (e2)
+          const error = retry ? e2 : e;
+
+          if (error instanceof AttestationError && error.action === GossipAction.REJECT) {
+            const archivedPath = chain.persistInvalidSszObject(
+              "signedAggregatedAndProof",
+              ssz.phase0.SignedAggregateAndProof.serialize(signedAggregateAndProof),
+              toHexString(ssz.phase0.SignedAggregateAndProof.hashTreeRoot(signedAggregateAndProof))
+            );
+            logger.debug("The invalid gossip aggregate and proof was written to", archivedPath, e);
+          }
+
+          if (indexedAttestation === undefined || committeeIndices === undefined) throw error;
         }
-        throw e;
       }
+
+      // Handler
+      metrics?.registerAggregatedAttestation(
+        OpSource.gossip,
+        seenTimestampSec,
+        signedAggregateAndProof,
+        indexedAttestation
+      );
+      const aggregatedAttestation = signedAggregateAndProof.message.aggregate;
+
+      chain.aggregatedAttestationPool.add(
+        aggregatedAttestation,
+        indexedAttestation.attestingIndices as ValidatorIndex[],
+        committeeIndices
+      );
     },
 
     [GossipType.beacon_attestation]: async (attestation, {subnet}, _peer, seenTimestampSec) => {
@@ -169,15 +181,34 @@ export function getGossipHandlers(modules: ValidatorFnsModules): GossipHandlers 
       try {
         indexedAttestation = (await validateGossipAttestation(chain, attestation, subnet)).indexedAttestation;
       } catch (e) {
-        if (e instanceof AttestationError && e.action === GossipAction.REJECT) {
-          const archivedPath = chain.persistInvalidSszObject(
-            "attestation",
-            ssz.phase0.Attestation.serialize(attestation),
-            toHexString(ssz.phase0.Attestation.hashTreeRoot(attestation))
-          );
-          logger.debug("The invalid gossip attestation was written to", archivedPath);
+        if (!(e instanceof AttestationError)) throw e;
+
+        let retry = false;
+        try {
+          if (e.type.code === AttestationErrorCode.UNKNOWN_BEACON_BLOCK_ROOT) {
+            const {slot, beaconBlockRoot} = attestation.data;
+            await chain.reprocessController.waitForBlock({slot, root: toHexString(beaconBlockRoot)});
+            // block comes, retry. Otherwises it jumps to the catch (e2) clause below.
+            retry = true;
+            indexedAttestation = (await validateGossipAttestation(chain, attestation, subnet)).indexedAttestation;
+          } else {
+            throw e;
+          }
+        } catch (e2) {
+          // if "waitForBlock" gets rejected, ignore its error (e2)
+          const error = retry ? e2 : e;
+
+          if (error instanceof AttestationError && error.action === GossipAction.REJECT) {
+            const archivedPath = chain.persistInvalidSszObject(
+              "attestation",
+              ssz.phase0.Attestation.serialize(attestation),
+              toHexString(ssz.phase0.Attestation.hashTreeRoot(attestation))
+            );
+            logger.debug("The invalid gossip attestation was written to", archivedPath);
+          }
+
+          if (indexedAttestation === undefined) throw error;
         }
-        throw e;
       }
 
       metrics?.registerUnaggregatedAttestation(OpSource.gossip, seenTimestampSec, indexedAttestation);
